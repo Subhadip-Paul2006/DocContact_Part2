@@ -4,7 +4,7 @@
 // `withAuth` already wraps the inner handler in try/catch + `errorToResponse`,
 // so we just throw or return and let the wrapper handle errors.
 
-import { ok, fail } from '@server/http';
+import { ok, fail, assertSameOrigin, errorToResponse } from '@server/http';
 import { withAuth } from '@server/withAuth';
 import { createBooking, listBookingsForUser } from '@server/bookings/service';
 import { createBookingSchema } from '@schemas/booking';
@@ -18,7 +18,14 @@ export const GET = withAuth(async (_req, { user }) => {
 });
 
 export const POST = withAuth(async (req, { user }) => {
-    const body = await req.json().catch(() => ({}));
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+    let body: unknown = {};
+    try {
+        body = await req.json();
+    } catch (err) {
+        return errorToResponse(err);
+    }
     const parsed = createBookingSchema.safeParse(body);
     if (!parsed.success) {
         return fail(400, parsed.error.issues[0]?.message ?? 'Invalid input.', 'VALIDATION');

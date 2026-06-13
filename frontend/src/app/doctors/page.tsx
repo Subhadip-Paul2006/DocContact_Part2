@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { api } from '@/lib/api';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { DoctorCard } from '@/components/doctors/DoctorCard';
 import { DoctorFilters } from '@/components/doctors/DoctorFilters';
 import type { Doctor, Treatment } from '@/types/api';
@@ -25,34 +26,41 @@ function DoctorsPageInner() {
     const city = searchParams.get('city') ?? '';
     const activeOnly = searchParams.get('activeOnly') === 'true';
 
+    // The text input is wired straight to the URL, but we don't want
+    // to fire a server request on every keystroke. The debounced value
+    // is the one we actually fetch on; the immediate value still drives
+    // the controlled input so the UI feels instant.
+    const debouncedSearch = useDebouncedValue(search, 250);
+
     useEffect(() => {
-        let cancelled = false;
-        // Reset to "loading" only when filters actually change — not
-        // during the initial mount, where the prior render already has
-        // `doctors === null`. We defer the reset to a microtask so the
-        // effect body itself stays free of synchronous setState calls.
-        queueMicrotask(() => {
-            if (cancelled) return;
-            setDoctors((prev) => (prev === null ? prev : null));
-            setError((prev) => (prev === null ? prev : null));
-        });
+        // Cancel any in-flight request first so a stale response can't
+        // overwrite a fresher one when filters change rapidly.
+        const ctrl = new AbortController();
         const qs = new URLSearchParams();
-        if (search) qs.set('search', search);
+        if (debouncedSearch) qs.set('search', debouncedSearch);
         if (treatment) qs.set('treatment', treatment);
         if (city) qs.set('city', city);
         if (activeOnly) qs.set('activeOnly', 'true');
 
-        api<{ data: { doctors: Doctor[] } }>(`/api/doctors?${qs.toString()}`)
+        // Defer the loading-state reset to a microtask so the effect
+        // body itself stays free of synchronous setState calls.
+        queueMicrotask(() => {
+            setDoctors((prev) => (prev === null ? prev : null));
+            setError((prev) => (prev === null ? prev : null));
+        });
+        api<{ data: { doctors: Doctor[] } }>(`/api/doctors?${qs.toString()}`, { signal: ctrl.signal })
             .then((d) => {
-                if (!cancelled) setDoctors(d.data.doctors);
+                if (ctrl.signal.aborted) return;
+                setDoctors(d.data.doctors);
             })
             .catch((e) => {
-                if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load doctors.');
+                if (ctrl.signal.aborted) return;
+                setError(e instanceof Error ? e.message : 'Failed to load doctors.');
             });
         return () => {
-            cancelled = true;
+            ctrl.abort();
         };
-    }, [search, treatment, city, activeOnly]);
+    }, [debouncedSearch, treatment, city, activeOnly]);
 
     // Construct persistent list of cities so filtering does not empty the select options
     const citiesList = useMemo(() => {

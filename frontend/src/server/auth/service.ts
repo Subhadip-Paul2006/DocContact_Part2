@@ -23,16 +23,37 @@ export async function createUser(input: SignupInput): Promise<AuthedUser> {
         throw new HttpError(409, 'Email already registered.', 'EMAIL_TAKEN');
     }
     const passwordHash = bcrypt.hashSync(input.password, 10);
-    const created = await prisma.user.create({
-        data: {
-            email: input.email,
-            name: input.name,
-            passwordHash,
-            role: input.role,
-        },
-        select: { id: true, email: true, name: true, role: true, createdAt: true },
-    });
-    return toAuthedUser(created);
+    try {
+        const created = await prisma.user.create({
+            data: {
+                email: input.email,
+                name: input.name,
+                passwordHash,
+                role: input.role,
+            },
+            select: { id: true, email: true, name: true, role: true, createdAt: true },
+        });
+        return toAuthedUser(created);
+    } catch (err) {
+        // Race-window: another request created the same email between our
+        // pre-check and the insert. Prisma raises P2002 (unique violation).
+        // Map it to the same 409 the pre-check uses so the client always
+        // gets a friendly "already exists" message instead of a 500.
+        if (isUniqueEmailError(err)) {
+            throw new HttpError(409, 'Email already registered.', 'EMAIL_TAKEN');
+        }
+        throw err;
+    }
+}
+
+function isUniqueEmailError(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { code?: unknown; meta?: { target?: unknown } };
+    if (e.code !== 'P2002') return false;
+    const target = e.meta?.target;
+    if (Array.isArray(target)) return target.includes('email');
+    if (typeof target === 'string') return target === 'email' || target === 'users_email_key';
+    return true;
 }
 
 export async function findUserById(id: string | number): Promise<AuthedUser | null> {

@@ -28,7 +28,19 @@ export function useAuth() {
     const { data, status, update } = useSession();
 
     const login = useCallback(async (email: string, password: string) => {
-        const res = await signIn('credentials', { email, password, redirect: false });
+        // The Auth.js `signIn` call can reject on network failures
+        // (offline, server 5xx, CORS). Wrap it so the caller can
+        // handle the error with a normal try/catch — otherwise the
+        // rejection becomes an unhandled promise rejection.
+        let res;
+        try {
+            res = await signIn('credentials', { email, password, redirect: false });
+        } catch (e) {
+            throw new ApiError(
+                e instanceof Error ? e.message : 'Sign-in request failed.',
+                0,
+            );
+        }
         if (!res || res.error) {
             throw new ApiError('Email or password is incorrect.', 401);
         }
@@ -47,13 +59,29 @@ export function useAuth() {
         });
         // Now perform a real credentials sign-in. This sets the session
         // cookie in the normal client → /api/auth/callback/credentials flow.
-        const res = await signIn('credentials', { email, password, redirect: false });
+        let res;
+        try {
+            res = await signIn('credentials', { email, password, redirect: false });
+        } catch (e) {
+            throw new ApiError(
+                e instanceof Error ? e.message : 'Sign-in request failed.',
+                0,
+            );
+        }
         if (!res || res.error) {
             throw new ApiError('Account created but sign-in failed. Please log in manually.', 500);
         }
         await update();
         const me = await api<{ data: { user: AuthedUser | null } }>('/api/auth/me');
-        return me.data.user!;
+        // The cookie can take a tick to land in subsequent fetches; if
+        // `/api/auth/me` returns null here, the session was not actually
+        // established and the previous `!` would have manufactured a
+        // phantom identity. Surface a clear error instead of letting the
+        // caller (signup page) route a nonexistent user to /apply.
+        if (!me.data.user) {
+            throw new ApiError('Account created but sign-in failed. Please log in manually.', 500);
+        }
+        return me.data.user;
     }, [update]);
 
     const logout = useCallback(async () => {

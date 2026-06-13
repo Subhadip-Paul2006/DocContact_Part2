@@ -1,5 +1,3 @@
-'use client';
-
 // Filters for the doctors list — search + treatment + city + active toggle.
 
 import type { Treatment } from '@/types/api';

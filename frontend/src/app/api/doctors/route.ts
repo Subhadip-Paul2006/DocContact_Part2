@@ -1,7 +1,7 @@
 // GET  /api/doctors       — list + filter (treatment, city, search, activeOnly)
 // POST /api/doctors       — apply (auth + role=doctor)
 
-import { ok, fail, errorToResponse } from '@server/http';
+import { ok, fail, errorToResponse, assertSameOrigin } from '@server/http';
 import { withAuth, withRole } from '@server/withAuth';
 import { listDoctors, applyAsDoctor } from '@server/doctors/service';
 import { doctorApplySchema, doctorListQuerySchema } from '@schemas/doctor';
@@ -28,7 +28,14 @@ export async function GET(req: Request) {
 }
 
 export const POST = withRole('doctor')(async (req, { user }) => {
-    const body = await req.json().catch(() => ({}));
+    const csrf = assertSameOrigin(req);
+    if (csrf) return csrf;
+    let body: unknown = {};
+    try {
+        body = await req.json();
+    } catch (err) {
+        return errorToResponse(err);
+    }
     const parsed = doctorApplySchema.safeParse(body);
     if (!parsed.success) {
         return fail(400, parsed.error.issues[0]?.message ?? 'Invalid input.', 'VALIDATION');

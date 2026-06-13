@@ -8,7 +8,7 @@
 // retry with exponential backoff (capped) and surface the
 // disconnected state to the caller so the UI can show a banner.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // Initial-snapshot shape mirrors what /api/queue/stream emits on connect.
 export interface QueueSnapshot {
@@ -29,14 +29,18 @@ const BASE_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
 export function useQueueStream(onUpdate: () => void, options: UseQueueStreamOptions = {}) {
-    // `useRef` initial values are the one place it's safe to read/write
-    // during render. We store the latest callback refs by re-creating
-    // them via a layout effect so we don't mutate `ref.current` during
-    // the render phase.
+    // The three callback refs are read by SSE event handlers. If we
+    // refreshed them in a regular `useEffect`, the very first event
+    // after mount could fire before the effect runs, reading the
+    // previous render's callbacks (or `null`). `useLayoutEffect`
+    // runs synchronously after DOM mutations and before paint, so
+    // the refs are guaranteed to be current before any network or
+    // event-loop callback can read them. All our consumers are
+    // `'use client'` components, so the SSR warning does not apply.
     const onUpdateRef = useRef(onUpdate);
     const onSnapshotRef = useRef(options.onSnapshot);
     const onStateRef = useRef(options.onStateChange);
-    useEffect(() => {
+    useLayoutEffect(() => {
         onUpdateRef.current = onUpdate;
         onSnapshotRef.current = options.onSnapshot;
         onStateRef.current = options.onStateChange;

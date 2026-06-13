@@ -115,7 +115,10 @@ export async function getDoctor(id: string): Promise<DoctorRow> {
 }
 
 export async function applyAsDoctor(userId: number, input: DoctorApplyInput): Promise<DoctorRow> {
-    const id = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // `crypto.randomUUID()` is available in Node 19+ and gives a 128-bit
+    // collision-resistant id. The previous `Date.now() + 6 base36 chars`
+    // shape collided on concurrent inserts and surfaced a 500.
+    const id = `doc_${crypto.randomUUID()}`;
     let fullName = input.fullName;
     if (!/^dr\.?/i.test(fullName)) {
         fullName = `Dr. ${fullName}`;
@@ -144,10 +147,14 @@ export async function applyAsDoctor(userId: number, input: DoctorApplyInput): Pr
     return toDoctor(created);
 }
 
-export async function advanceQueue(id: string): Promise<DoctorRow> {
+export async function advanceQueue(id: string, userId: number): Promise<DoctorRow> {
     const ok = await prisma.$transaction(async (tx) => {
         const doc = await tx.doctor.findUnique({ where: { id } });
         if (!doc || !doc.available) return false;
+        // Ownership check: only the doctor who created the chamber may
+        // advance its queue. The previous implementation trusted the URL
+        // param alone, which is a textbook IDOR.
+        if (doc.userId !== userId) return false;
         if (doc.currentToken >= doc.totalTokens) return false;
         await tx.doctor.update({
             where: { id },
@@ -158,7 +165,7 @@ export async function advanceQueue(id: string): Promise<DoctorRow> {
     if (!ok) {
         throw new HttpError(
             400,
-            'Queue cannot be advanced (already finished or doctor unavailable).',
+            'Queue cannot be advanced (already finished, doctor unavailable, or not your chamber).',
             'BUSINESS'
         );
     }
@@ -169,7 +176,19 @@ export async function advanceQueue(id: string): Promise<DoctorRow> {
     return toDoctor(updated);
 }
 
-export async function resetQueue(id: string): Promise<DoctorRow> {
+export async function resetQueue(id: string, userId: number): Promise<DoctorRow> {
+    // Same ownership guard as advanceQueue. Resetting another doctor's
+    // queue is a destructive privileged action and must be gated.
+    const owned = await prisma.doctor.findUnique({
+        where: { id },
+        select: { userId: true },
+    });
+    if (!owned) {
+        throw new HttpError(404, 'Doctor not found.', 'NOT_FOUND');
+    }
+    if (owned.userId !== userId) {
+        throw new HttpError(403, 'You can only reset your own chamber queue.', 'FORBIDDEN');
+    }
     await prisma.doctor.update({ where: { id }, data: { currentToken: 0 } });
     const updated = await prisma.doctor.findUnique({ where: { id } });
     if (!updated) {

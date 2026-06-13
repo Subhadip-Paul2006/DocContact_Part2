@@ -5,7 +5,7 @@
 // error would mask real failures. Instead, we return success and the client
 // (`useAuth.signup`) performs a normal credentials sign-in afterwards.
 
-import { ok, fail, errorToResponse } from '@server/http';
+import { ok, fail, errorToResponse, assertSameOrigin } from '@server/http';
 import { createUser } from '@server/auth/service';
 import { signupSchema } from '@schemas/user';
 
@@ -14,7 +14,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
     try {
-        const body = await req.json().catch(() => ({}));
+        const csrf = assertSameOrigin(req);
+        if (csrf) return csrf;
+        let body: unknown = {};
+        try {
+            body = await req.json();
+        } catch (err) {
+            return errorToResponse(err);
+        }
         const parsed = signupSchema.safeParse(body);
         if (!parsed.success) {
             return fail(400, parsed.error.issues[0]?.message ?? 'Invalid input.', 'VALIDATION');

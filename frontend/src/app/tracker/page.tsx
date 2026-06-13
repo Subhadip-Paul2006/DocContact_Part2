@@ -1,12 +1,14 @@
 'use client';
 
 // Tracker — list the logged-in user's bookings with live queue position.
-// SSE drives the refetch; on error, fall back to 10s polling.
+// SSE drives the refetch; the 10s poll is only used as a fallback when
+// the SSE connection is unhealthy (disconnected, unsupported, or
+// still connecting for the first time).
 
 // Live queue + auth — opt out of static prerendering.
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
@@ -14,19 +16,58 @@ import { useAuth } from '@/features/auth/useAuth';
 import { useQueueStream } from '@/features/queue/useQueueStream';
 import type { Booking } from '@/types/api';
 
+const DAYS_OF_WEEK_LONG = [
+    'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+];
+
+// Pure helper. Builds the same human-readable date string the old
+// inline IIFE produced — pulled out so the per-row render is a single
+// function call instead of an array allocation + Intl call on every
+// booking every render.
+function formatBookingDate(value: string): string {
+    try {
+        const d = new Date(value);
+        if (Number.isNaN(d.getTime())) return value;
+        return `${DAYS_OF_WEEK_LONG[d.getDay()]}, ${d.getDate()} ${d.toLocaleString('en-US', { month: 'short' })}`;
+    } catch {
+        return value;
+    }
+}
+
+interface BookingRowDerived {
+    formattedDate: string;
+    current: number;
+    wait: number;
+    yourTurn: boolean;
+    isMissed: boolean;
+}
+
 export default function TrackerPage() {
     const { user, ready } = useAuth();
     const router = useRouter();
     const [bookings, setBookings] = useState<Booking[] | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [pendingDoctorId, setPendingDoctorId] = useState<string | null>(null);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // AbortController per fetch so a stale response can't overwrite a
+    // fresh one. The ref holds the current controller; we abort it
+    // before starting a new fetch and on unmount.
+    const inFlightRef = useRef<AbortController | null>(null);
 
     const fetchBookings = useCallback(async () => {
+        // Cancel any in-flight request first so the older response
+        // can't resolve last and clobber the newer one.
+        inFlightRef.current?.abort();
+        const ctrl = new AbortController();
+        inFlightRef.current = ctrl;
         try {
-            const data = await api<{ data: { bookings: Booking[] } }>('/api/bookings');
+            const data = await api<{ data: { bookings: Booking[] } }>('/api/bookings', {
+                signal: ctrl.signal,
+            });
             setBookings(data.data.bookings);
         } catch (e) {
+            if (ctrl.signal.aborted) return;
             setError(e instanceof Error ? e.message : 'Failed to load bookings.');
         }
     }, []);
@@ -38,7 +79,7 @@ export default function TrackerPage() {
         }, 500);
     }, [fetchBookings]);
 
-    useQueueStream(scheduleRefetch);
+    const { state: sseState } = useQueueStream(scheduleRefetch);
 
     useEffect(() => {
         if (!ready) return;
@@ -49,34 +90,89 @@ export default function TrackerPage() {
         // Trigger the initial fetch via a microtask rather than the
         // effect body so we don't cascade-render synchronously.
         const initialFetch = setTimeout(fetchBookings, 0);
-        // Fallback poll in case the SSE stream isn't reachable.
-        if (!pollRef.current) pollRef.current = setInterval(fetchBookings, 10000);
         return () => {
             clearTimeout(initialFetch);
-            if (pollRef.current) clearInterval(pollRef.current);
             if (refreshTimeout.current) clearTimeout(refreshTimeout.current);
-            pollRef.current = null;
             refreshTimeout.current = null;
         };
     }, [ready, user, router, fetchBookings]);
 
+    // SSE-health-aware poll: only run the 10s poll when SSE is
+    // disconnected, unsupported, or still connecting on the first
+    // attempt. Drops 1 roundtrip per 10s for every user with a healthy
+    // SSE connection.
+    useEffect(() => {
+        if (!ready || !user) return;
+        if (sseState === 'open') {
+            if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+            }
+            return;
+        }
+        if (pollRef.current) return;
+        pollRef.current = setInterval(fetchBookings, 10000);
+        return () => {
+            if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+            }
+        };
+    }, [ready, user, sseState, fetchBookings]);
+
+    // Abort any in-flight request and clear pending timers on unmount.
+    useEffect(() => {
+        return () => {
+            inFlightRef.current?.abort();
+            inFlightRef.current = null;
+        };
+    }, []);
+
     const handleAdvance = async (doctorId: string) => {
+        if (pendingDoctorId) return;
+        setPendingDoctorId(doctorId);
         try {
             await api(`/api/doctors/${doctorId}/advance`, { method: 'POST' });
             fetchBookings();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Could not advance queue.');
+        } finally {
+            setPendingDoctorId(null);
         }
     };
 
     const handleReset = async (doctorId: string) => {
+        if (pendingDoctorId) return;
+        setPendingDoctorId(doctorId);
         try {
             await api(`/api/doctors/${doctorId}/reset`, { method: 'POST' });
             fetchBookings();
         } catch (e) {
             setError(e instanceof Error ? e.message : 'Could not reset queue.');
+        } finally {
+            setPendingDoctorId(null);
         }
     };
+
+    // Memoize the derived per-booking fields. Each row's `current` /
+    // `wait` / `yourTurn` / `isMissed` / `formattedDate` is now
+    // computed exactly once per bookings-array change, not once per
+    // render of every row.
+    const derived = useMemo<BookingRowDerived[]>(() => {
+        if (!bookings) return [];
+        return bookings.map((b) => {
+            const doc = b.doctor;
+            const current = doc?.currentToken ?? 0;
+            const wait = Math.max(0, b.tokenNumber - current);
+            return {
+                formattedDate: formatBookingDate(b.bookingDate),
+                current,
+                wait,
+                yourTurn: wait === 0 && current >= b.tokenNumber,
+                isMissed: current > b.tokenNumber,
+            };
+        });
+    }, [bookings]);
 
     if (!user) {
         return (
@@ -143,28 +239,13 @@ export default function TrackerPage() {
                 </div>
             ) : (
                 <div className="space-y-6">
-                    {bookings.map((b) => {
-                        const doc = b.doctor;
-                        const current = doc?.currentToken ?? 0;
-                        const wait = Math.max(0, b.tokenNumber - current);
-                        const yourTurn = wait === 0 && current >= b.tokenNumber;
-                        const isMissed = current > b.tokenNumber;
-
-                        // Formatting date
-                        let formattedDate = b.bookingDate;
-                        try {
-                            const dateObj = new Date(b.bookingDate);
-                            const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                            formattedDate = `${daysOfWeek[dateObj.getDay()]}, ${dateObj.getDate()} ${dateObj.toLocaleString('en-US', { month: 'short' })}`;
-                        } catch {
-                            // fallback
-                        }
-
+                    {bookings.map((b, i) => {
+                        const row = derived[i];
                         return (
-                            <div 
-                                key={b.id} 
+                            <div
+                                key={b.id}
                                 className={`card rounded-3xl p-6 md:p-8 flex flex-col md:flex-row md:items-stretch justify-between gap-6 transition-all bg-white border border-[#252a67]/5 shadow-sm ${
-                                    yourTurn ? 'bg-emerald-50/20 border-emerald-300' : ''
+                                    row.yourTurn ? 'bg-emerald-50/20 border-emerald-300' : ''
                                 }`}
                             >
                                 {/* Left block: doctor and patient booking details */}
@@ -184,7 +265,7 @@ export default function TrackerPage() {
                                             </div>
                                             <div>
                                                 <span className="text-gray-400 block">Scheduled Timing</span>
-                                                <strong className="text-[#252a67] font-bold">{formattedDate} at {b.timeSlot}</strong>
+                                                <strong className="text-[#252a67] font-bold">{row.formattedDate} at {b.timeSlot}</strong>
                                             </div>
                                         </div>
                                     </div>
@@ -202,14 +283,16 @@ export default function TrackerPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => handleAdvance(b.doctorId)}
-                                                className="py-1 px-3 bg-gray-100 hover:bg-[#252a67] hover:text-white rounded-lg text-[10px] font-bold text-[#252a67] transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#252a67]/40 cursor-pointer"
+                                                disabled={pendingDoctorId !== null}
+                                                className="py-1 px-3 bg-gray-100 hover:bg-[#252a67] hover:text-white rounded-lg text-[10px] font-bold text-[#252a67] transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#252a67]/40 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <i className="fas fa-plus text-[8px]" aria-hidden="true" /> Call Next Patient
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => handleReset(b.doctorId)}
-                                                className="py-1 px-3 bg-gray-50 hover:bg-red-50 hover:text-red-500 rounded-lg text-[10px] font-bold text-gray-400 transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-red-300 cursor-pointer"
+                                                disabled={pendingDoctorId !== null}
+                                                className="py-1 px-3 bg-gray-50 hover:bg-red-50 hover:text-red-500 rounded-lg text-[10px] font-bold text-gray-400 transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-red-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 <i className="fas fa-undo text-[8px]" aria-hidden="true" /> Reset Queue
                                             </button>
@@ -226,7 +309,7 @@ export default function TrackerPage() {
                                         </div>
                                         <div className="bg-[#252a67]/5 text-[#252a67] p-2 rounded-xl text-center min-w-[80px]">
                                             <span className="text-[9px] text-gray-400 block uppercase font-bold tracking-wider leading-none">Serving Now</span>
-                                            <strong className="text-xl font-black mt-0.5 leading-none block">{current}</strong>
+                                            <strong className="text-xl font-black mt-0.5 leading-none block">{row.current}</strong>
                                         </div>
                                     </div>
 
@@ -235,7 +318,7 @@ export default function TrackerPage() {
                                         "your turn" change as soon as the
                                         queue advances. */}
                                     <div aria-live="polite" aria-atomic="true">
-                                        {yourTurn ? (
+                                        {row.yourTurn ? (
                                             <>
                                                 <div className="bg-emerald-500 text-white rounded-2xl p-4 animate-pulse flex items-center justify-between shadow-md shadow-emerald-100">
                                                     <span className="font-black flex items-center gap-2 text-sm"><i className="fas fa-bullhorn" aria-hidden="true" /> IT&apos;S YOUR TURN!</span>
@@ -243,7 +326,7 @@ export default function TrackerPage() {
                                                 </div>
                                                 <p className="text-emerald-600 font-bold text-[10px] text-right mt-1.5">Please report to the compounder immediately.</p>
                                             </>
-                                        ) : isMissed ? (
+                                        ) : row.isMissed ? (
                                             <>
                                                 <div className="bg-gray-100 text-gray-500 rounded-2xl p-4 flex items-center justify-between">
                                                     <span className="font-bold flex items-center gap-2"><i className="fas fa-check-circle" aria-hidden="true" /> Appointment:</span>
@@ -255,7 +338,7 @@ export default function TrackerPage() {
                                             <>
                                                 <div className="bg-[#252a67]/5 text-[#252a67] border border-[#252a67]/10 rounded-2xl p-4 flex items-center justify-between">
                                                     <span className="font-bold flex items-center gap-2 text-xs"><i className="fas fa-hourglass-half text-[#252a67]" aria-hidden="true" /> Chamber Status:</span>
-                                                    <span className="font-black text-xs text-right">{wait} patient{wait === 1 ? '' : 's'} ahead</span>
+                                                    <span className="font-black text-xs text-right">{row.wait} patient{row.wait === 1 ? '' : 's'} ahead</span>
                                                 </div>
                                                 <p className="text-gray-400 text-[10px] text-right mt-1.5">Please arrive at the chamber at least 15 mins before your token is called.</p>
                                             </>

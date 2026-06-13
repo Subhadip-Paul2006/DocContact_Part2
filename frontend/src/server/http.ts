@@ -23,6 +23,49 @@ export function fail(status: number, message: string, code?: string): NextRespon
     return NextResponse.json({ error: { message, code } }, { status });
 }
 
+/**
+ * Origin/Referer check for state-changing routes.
+ *
+ * NextAuth's session cookie is `SameSite=lax` by default, which blocks
+ * cross-site POSTs from a third-party form on a modern browser, but it
+ * does NOT cover same-site sub-domains, same-origin pages rendered in
+ * an `<iframe>`, or `fetch(..., { credentials: 'include' })` from a
+ * subdomain XSS. To keep CSRF out of the picture we additionally
+ * require the request's `Origin` (or `Referer` as a fallback) header
+ * to match the host the route is being served from. Browser-driven
+ * same-origin requests always carry one; cross-origin requests can't
+ * forge one.
+ *
+ * Returns a 403 response when the check fails, or `null` when it
+ * passes.
+ */
+export function assertSameOrigin(req: Request): NextResponse | null {
+    if (process.env.NODE_ENV !== 'production') return null;
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;
+
+    const reqUrl = new URL(req.url);
+    const expected = reqUrl.host;
+    const headerOrigin = req.headers.get('origin');
+    if (headerOrigin) {
+        try {
+            if (new URL(headerOrigin).host === expected) return null;
+        } catch {
+            // malformed origin -> fall through to referer
+        }
+        return fail(403, 'Cross-origin request blocked.', 'CSRF');
+    }
+    const referer = req.headers.get('referer');
+    if (referer) {
+        try {
+            if (new URL(referer).host === expected) return null;
+        } catch {
+            // malformed referer -> fall through
+        }
+    }
+    return fail(403, 'Cross-origin request blocked.', 'CSRF');
+}
+
 export function errorToResponse(err: unknown): NextResponse {
     if (err instanceof HttpError) {
         return fail(err.status, err.message, err.code);
@@ -38,11 +81,9 @@ export function errorToResponse(err: unknown): NextResponse {
         if (message.includes('full') || message.includes('not found')) {
             return fail(400, message, 'BUSINESS');
         }
-        // eslint-disable-next-line no-console
         console.error('[route] unhandled error:', err);
         return fail(500, 'Internal server error', 'INTERNAL');
     }
-    // eslint-disable-next-line no-console
     console.error('[route] non-object throw:', err);
     return fail(500, 'Internal server error', 'INTERNAL');
 }

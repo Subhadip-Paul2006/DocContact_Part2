@@ -22,23 +22,28 @@ export default function HomePage() {
     const searchOpenLive = searchOpen;
 
     useEffect(() => {
-        let cancelled = false;
+        // Single controller shared across both requests so unmount or
+        // re-mount cancels both in-flight fetches together.
+        const ctrl = new AbortController();
         Promise.all([
-            api<{ data: { doctors: Doctor[] } }>('/api/doctors/active?limit=4'),
-            api<{ data: { doctors: Doctor[] } }>('/api/doctors?activeOnly=true'),
+            api<{ data: { doctors: Doctor[] } }>('/api/doctors/active?limit=4', { signal: ctrl.signal }),
+            api<{ data: { doctors: Doctor[] } }>('/api/doctors?activeOnly=true', { signal: ctrl.signal }),
         ])
             .then(([active, available]) => {
-                if (cancelled) return;
+                if (ctrl.signal.aborted) return;
                 setActiveDoctors(active.data.doctors);
                 setAllDoctors(available.data.doctors);
             })
-            .catch(() => {
-                if (cancelled) return;
+            .catch((e) => {
+                if (ctrl.signal.aborted) return;
+                // Network failure is non-fatal — the home page still
+                // renders, just without live chamber data.
+                if (e instanceof Error && e.name === 'AbortError') return;
                 setActiveDoctors([]);
                 setAllDoctors([]);
             });
         return () => {
-            cancelled = true;
+            ctrl.abort();
         };
     }, []);
 

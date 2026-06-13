@@ -64,7 +64,11 @@ function toBooking(b: {
 }
 
 export async function createBooking(userId: number, input: CreateBookingInput): Promise<BookingRow> {
-    const bookingId = `bk_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    // 128-bit collision-resistant id. The previous `Date.now() + 4
+    // base36 chars` shape (~20 bits of entropy, millisecond-shared
+    // across concurrent requests) collided under load and surfaced
+    // as a 500 from the second `prisma.booking.create`.
+    const bookingId = `bk_${crypto.randomUUID()}`;
 
     const booking = await prisma.$transaction(async (tx) => {
         const doc = await tx.doctor.findUnique({ where: { id: input.doctorId } });

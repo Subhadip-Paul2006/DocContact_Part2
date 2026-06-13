@@ -16,6 +16,23 @@ const TIME_SLOTS = [
     '06:00 PM', '06:30 PM', '07:00 PM', '07:30 PM',
 ];
 
+// Hoisted to module scope so the per-render `dates.map` doesn't
+// re-allocate these arrays on every booking row.
+const DAYS_OF_WEEK_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Pure helper for the success modal. Kept at module scope because
+// the inputs don't depend on component state.
+function formatReceiptDate(value: string): string {
+    try {
+        const dateObj = new Date(value);
+        if (Number.isNaN(dateObj.getTime())) return value;
+        return `${dateObj.getDate()} ${MONTHS_SHORT[dateObj.getMonth()]}`;
+    } catch {
+        return value;
+    }
+}
+
 function nextDates(n: number): string[] {
     const out: string[] = [];
     const today = new Date();
@@ -70,6 +87,14 @@ export function BookingForm({ doctor }: { doctor: Doctor }) {
     const [submitting, setSubmitting] = useState(false);
     const [serverError, setServerError] = useState<string | null>(null);
     const [result, setResult] = useState<Booking | null>(null);
+    // Memoize the success-modal date label so we only format once
+    // per booking date (the modal otherwise rebuilds this on every
+    // parent re-render, including the loading/error toggles that
+    // happen between modal open and close).
+    const receiptDate = useMemo(
+        () => (result ? formatReceiptDate(result.bookingDate) : ''),
+        [result]
+    );
 
     const update = (patch: Partial<FormState>) => setState((s) => ({ ...s, ...patch }));
 
@@ -145,17 +170,7 @@ export function BookingForm({ doctor }: { doctor: Doctor }) {
                             </div>
                             <div>
                                 <span className="text-gray-400 text-[10px] block">Appt Date</span>
-                                <strong className="text-[#252a67] font-bold">
-                                    {(() => {
-                                        try {
-                                            const dateObj = new Date(result.bookingDate);
-                                            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                                            return `${dateObj.getDate()} ${months[dateObj.getMonth()]}`;
-                                        } catch {
-                                            return result.bookingDate;
-                                        }
-                                    })()}
-                                </strong>
+                                <strong className="text-[#252a67] font-bold">{receiptDate}</strong>
                             </div>
                             <div className="text-right">
                                 <span className="text-gray-400 text-[10px] block">Session Time</span>
@@ -211,11 +226,9 @@ export function BookingForm({ doctor }: { doctor: Doctor }) {
                     {dates.map((dateStr) => {
                         const isSelected = state.date === dateStr;
                         const dateObj = new Date(dateStr);
-                        const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                        const dayName = daysOfWeek[dateObj.getDay()];
+                        const dayName = DAYS_OF_WEEK_SHORT[dateObj.getDay()];
                         const dayNum = dateObj.getDate();
-                        const monthName = months[dateObj.getMonth()];
+                        const monthName = MONTHS_SHORT[dateObj.getMonth()];
 
                         return (
                             <label
