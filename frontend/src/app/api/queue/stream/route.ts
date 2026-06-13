@@ -1,10 +1,13 @@
 // GET /api/queue/stream — Server-Sent Events stream of queue updates.
-// Auth-required. Each connected client receives a `queueUpdated` event
-// every time the simulator (or the advance/reset endpoints) ticks.
+// Auth-required. On connect, sends:
+//   1) `ready` beacon
+//   2) `snapshot` event with the current state of all available doctors
+//   3) every subsequent `queueUpdated` event from the simulator bus
 
 import { NextResponse } from 'next/server';
 import { getQueueBus, QUEUE_EVENT } from '@server/queue-bus';
 import { auth } from '@lib/auth';
+import { prisma } from '@lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +22,7 @@ export async function GET(req: Request) {
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
+        async start(controller) {
             const send = (event: string, data: unknown) => {
                 try {
                     controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
@@ -31,11 +34,26 @@ export async function GET(req: Request) {
             // 1) ready beacon
             send('ready', { ts: Date.now() });
 
-            // 2) subscribe to bus
+            // 2) initial snapshot — fetch current token state so the
+            //    tracker renders the latest values without waiting for
+            //    the next tick. We keep the payload small (id + token).
+            try {
+                const docs = await prisma.doctor.findMany({
+                    where: { available: true },
+                    select: { id: true, currentToken: true, totalTokens: true },
+                });
+                send('snapshot', { ts: Date.now(), doctors: docs });
+            } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('[queue/stream] snapshot fetch failed:', err);
+                send('snapshot', { ts: Date.now(), doctors: [] });
+            }
+
+            // 3) subscribe to bus
             const onUpdate = (payload: unknown) => send(QUEUE_EVENT, payload);
             bus.on(QUEUE_EVENT, onUpdate);
 
-            // 3) keep-alive every 25s
+            // 4) keep-alive every 25s
             const heartbeat = setInterval(() => {
                 try {
                     controller.enqueue(encoder.encode(`: ping\n\n`));
@@ -44,7 +62,7 @@ export async function GET(req: Request) {
                 }
             }, 25_000);
 
-            // 4) tear down on client disconnect
+            // 5) tear down on client disconnect
             req.signal.addEventListener('abort', () => {
                 clearInterval(heartbeat);
                 bus.off(QUEUE_EVENT, onUpdate);

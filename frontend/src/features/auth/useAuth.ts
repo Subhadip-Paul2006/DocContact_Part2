@@ -45,6 +45,12 @@ export function useAuth() {
             method: 'POST',
             body: { name, email, password, role } satisfies SignupPayload,
         });
+        // Now perform a real credentials sign-in. This sets the session
+        // cookie in the normal client → /api/auth/callback/credentials flow.
+        const res = await signIn('credentials', { email, password, redirect: false });
+        if (!res || res.error) {
+            throw new ApiError('Account created but sign-in failed. Please log in manually.', 500);
+        }
         await update();
         const me = await api<{ data: { user: AuthedUser | null } }>('/api/auth/me');
         return me.data.user!;

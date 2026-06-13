@@ -25,20 +25,21 @@ export async function tick(): Promise<{ advanced: number }> {
         for (const doc of doctors) {
             if (doc.currentToken >= doc.totalTokens) continue;
             if (Math.random() > ADVANCE_PROBABILITY) continue;
-            // Re-check + atomic update in one transaction.
-            const ok = await prisma.$transaction(async (tx) => {
+            // Re-check + atomic update in one transaction. Capture the
+            // post-update value so the broadcast matches reality.
+            const newToken = await prisma.$transaction(async (tx) => {
                 const fresh = await tx.doctor.findUnique({ where: { id: doc.id } });
-                if (!fresh || !fresh.available) return false;
-                if (fresh.currentToken >= fresh.totalTokens) return false;
-                await tx.doctor.update({
+                if (!fresh || !fresh.available) return null;
+                if (fresh.currentToken >= fresh.totalTokens) return null;
+                const updated = await tx.doctor.update({
                     where: { id: doc.id },
                     data: { currentToken: { increment: 1 } },
                 });
-                return true;
+                return updated.currentToken;
             });
-            if (ok) {
+            if (newToken !== null) {
                 advanced += 1;
-                emitQueueUpdate({ doctorId: doc.id, newCurrentToken: doc.currentToken + 1 });
+                emitQueueUpdate({ doctorId: doc.id, newCurrentToken: newToken });
             }
         }
     } catch (err) {

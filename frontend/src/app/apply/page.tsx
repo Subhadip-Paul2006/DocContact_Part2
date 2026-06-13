@@ -86,7 +86,7 @@ export default function ApplyPage() {
         const fees = Number(form.fees);
         if (!Number.isFinite(fees) || fees < 0 || fees > 100000) errs.push('Fees must be a valid amount.');
         const max = Number(form.maxTokens);
-        if (!Number.isFinite(max) || max < 1 || max > 500) errs.push('Max tokens must be 1–500.');
+        if (!Number.isFinite(max) || max < 1 || max > 200) errs.push('Max tokens must be 1–200.');
         
         setErrors(errs);
         if (errs.length > 0) return;
@@ -366,8 +366,8 @@ export default function ApplyPage() {
                                         type="number"
                                         id="maxTokens"
                                         required
-                                        min="5"
-                                        max="100"
+                                        min="1"
+                                        max="200"
                                         value={form.maxTokens}
                                         onChange={(e) => update({ maxTokens: e.target.value })}
                                         className="py-2.5 px-4 border border-gray-200 focus:border-primary rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"

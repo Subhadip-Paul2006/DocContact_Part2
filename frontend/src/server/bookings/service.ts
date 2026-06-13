@@ -1,6 +1,7 @@
 // Booking service — create (with the queue-full CAS) + list by user.
 
 import { prisma } from '../../lib/db';
+import { HttpError } from '../http';
 import type { CreateBookingInput } from '../../schemas/booking';
 import type { DoctorRow } from '../doctors/service';
 import { toDoctor } from '../doctors/service';
@@ -68,19 +69,17 @@ export async function createBooking(userId: number, input: CreateBookingInput): 
     const booking = await prisma.$transaction(async (tx) => {
         const doc = await tx.doctor.findUnique({ where: { id: input.doctorId } });
         if (!doc) {
-            const err = new Error('Doctor not found');
-            (err as { status?: number }).status = 404;
-            throw err;
+            throw new HttpError(404, 'Doctor not found.', 'NOT_FOUND');
         }
         if (doc.totalTokens >= doc.maxTokens) {
-            throw new Error('Doctor chamber queue is full for today!');
+            throw new HttpError(400, 'Doctor chamber queue is full for today!', 'BUSINESS');
         }
         const updated = await tx.doctor.updateMany({
             where: { id: input.doctorId, totalTokens: { lt: doc.maxTokens } },
             data: { totalTokens: { increment: 1 } },
         });
         if (updated.count === 0) {
-            throw new Error('Doctor chamber queue is full for today!');
+            throw new HttpError(400, 'Doctor chamber queue is full for today!', 'BUSINESS');
         }
         const newToken = doc.totalTokens + 1;
         return tx.booking.create({
