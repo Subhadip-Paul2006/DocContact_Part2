@@ -27,8 +27,15 @@ function DoctorsPageInner() {
 
     useEffect(() => {
         let cancelled = false;
-        setDoctors(null);
-        setError(null);
+        // Reset to "loading" only when filters actually change — not
+        // during the initial mount, where the prior render already has
+        // `doctors === null`. We defer the reset to a microtask so the
+        // effect body itself stays free of synchronous setState calls.
+        queueMicrotask(() => {
+            if (cancelled) return;
+            setDoctors((prev) => (prev === null ? prev : null));
+            setError((prev) => (prev === null ? prev : null));
+        });
         const qs = new URLSearchParams();
         if (search) qs.set('search', search);
         if (treatment) qs.set('treatment', treatment);
@@ -87,11 +94,13 @@ function DoctorsPageInner() {
     return (
         <main className="max-w-[88rem] mx-auto px-6 py-8 flex flex-col gap-6 fade-in">
             {/* Breadcrumbs */}
-            <div className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
-                <Link href="/" className="hover:text-primary transition-colors">Home</Link>
-                <i className="fas fa-chevron-right text-[8px]"></i>
-                <span className="text-[#252a67]">Available Doctors</span>
-            </div>
+            <nav aria-label="Breadcrumb">
+                <ol className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
+                    <li><Link href="/" className="hover:text-primary transition-colors">Home</Link></li>
+                    <li aria-hidden="true"><i className="fas fa-chevron-right text-[8px]" /></li>
+                    <li><span className="text-[#252a67]" aria-current="page">Available Doctors</span></li>
+                </ol>
+            </nav>
 
             {/* Page Title */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -113,34 +122,42 @@ function DoctorsPageInner() {
                 onChange={update}
             />
 
-            {error && <div className="error-banner">{error}</div>}
+            {error && <div className="error-banner" role="alert">{error}</div>}
 
-            {/* Results Count Info */}
+            {/* Results Count Info — `aria-live` so screen readers announce
+                the new count after each filter change. */}
             {doctors !== null && (
-                <div className="text-sm font-bold text-gray-500 mb-2">
+                <div
+                    className="text-sm font-bold text-gray-500 mb-2"
+                    aria-live="polite"
+                    aria-atomic="true"
+                >
                     Showing {doctors.length} verified doctor{doctors.length === 1 ? '' : 's'} in West Bengal
                 </div>
             )}
 
             {/* Grid listings */}
             {doctors === null ? (
-                <div className="loading">
+                <div className="loading" role="status" aria-live="polite">
                     <div className="spinner" />
+                    <span className="sr-only">Loading doctors…</span>
                 </div>
             ) : doctors.length === 0 ? (
                 <div className="col-span-full py-16 text-center bg-white border border-gray-100 rounded-3xl p-8 shadow-sm">
                     <div className="w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 text-3xl mx-auto mb-4">
-                        <i className="fas fa-user-md"></i>
+                        <i className="fas fa-user-md" aria-hidden="true" />
                     </div>
                     <h3 className="text-lg font-bold text-[#252a67] mb-1">No Doctors Found</h3>
-                    <p className="text-sm text-gray-500">We couldn't find any doctors matching your current filters. Try resetting search fields.</p>
+                    <p className="text-sm text-gray-500">We couldn&apos;t find any doctors matching your current filters. Try resetting search fields.</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8" role="list">
                     {doctors.map((d) => (
-                        <DoctorCard key={d.id} doctor={d} />
+                        <li key={d.id}>
+                            <DoctorCard doctor={d} />
+                        </li>
                     ))}
-                </div>
+                </ul>
             )}
         </main>
     );

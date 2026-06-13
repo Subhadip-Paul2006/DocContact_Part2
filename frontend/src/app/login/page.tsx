@@ -16,7 +16,17 @@ function LoginPageInner() {
     const { login, logout } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
-    const next = searchParams.get('next') || '/';
+    // `next` can be supplied as a query param by middleware so a deep
+    // link to /tracker, /apply etc. can be rehydrated after login. It must
+    // be a same-origin, path-only URL — anything else (a full URL pointing
+    // at a foreign host) would let an attacker craft a phishing link such
+    // as `/login?next=https://evil.example.com/steal-creds`. Strip the
+    // dangerous shapes before using it.
+    const rawNext = searchParams.get('next') || '/';
+    const next =
+        rawNext.startsWith('/') && !rawNext.startsWith('//')
+            ? rawNext
+            : '/';
 
     const [roleTab, setRoleTab] = useState<Role>('patient');
     const [email, setEmail] = useState('');
@@ -76,10 +86,17 @@ function LoginPageInner() {
                     <p className="text-xs text-gray-500 mt-1">Access your doctor booking queue and listings.</p>
                 </div>
 
-                {/* Role Selector Tabs */}
-                <div className="grid grid-cols-2 gap-2 border border-gray-100 bg-gray-50/50 p-1.5 rounded-2xl mb-6">
+                {/* Role Selector Tabs — rendered as a radiogroup so screen
+                    readers announce "tab 1 of 2" and arrow keys work. */}
+                <div
+                    className="grid grid-cols-2 gap-2 border border-gray-100 bg-gray-50/50 p-1.5 rounded-2xl mb-6"
+                    role="radiogroup"
+                    aria-label="Account type"
+                >
                     <button
                         type="button"
+                        role="radio"
+                        aria-checked={roleTab === 'patient'}
                         onClick={() => {
                             setRoleTab('patient');
                             setErrors([]);
@@ -94,6 +111,8 @@ function LoginPageInner() {
                     </button>
                     <button
                         type="button"
+                        role="radio"
+                        aria-checked={roleTab === 'doctor'}
                         onClick={() => {
                             setRoleTab('doctor');
                             setErrors([]);
@@ -108,9 +127,9 @@ function LoginPageInner() {
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4" noValidate>
                     {errors.length > 0 && (
-                        <div className="error-banner mb-4">
+                        <div className="error-banner mb-4" role="alert" aria-live="assertive">
                             {errors.map((e, i) => (
                                 <div key={i}>{e}</div>
                             ))}
@@ -122,12 +141,13 @@ function LoginPageInner() {
                             Email Address
                         </label>
                         <div className="relative flex items-center">
-                            <i className="far fa-envelope text-gray-400 absolute left-4"></i>
+                            <i className="far fa-envelope text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="login-email"
                                 type="email"
                                 required
                                 autoComplete="email"
+                                maxLength={254}
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -141,12 +161,13 @@ function LoginPageInner() {
                             Password
                         </label>
                         <div className="relative flex items-center">
-                            <i className="fas fa-lock text-gray-400 absolute left-4"></i>
+                            <i className="fas fa-lock text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="login-password"
                                 type="password"
                                 required
                                 autoComplete="current-password"
+                                maxLength={200}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -158,7 +179,7 @@ function LoginPageInner() {
                     <button
                         type="submit"
                         disabled={submitting}
-                        className="w-full py-3 px-4 font-bold text-xs text-white bg-[#252a67] hover:bg-[#1e2258] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                        className="w-full py-3 px-4 font-bold text-xs text-white bg-[#252a67] hover:bg-[#1e2258] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#252a67]/40"
                     >
                         {submitting ? 'Signing in…' : 'Login to Portal'}
                     </button>
@@ -166,7 +187,7 @@ function LoginPageInner() {
 
                 {/* Redirect links */}
                 <p className="text-center text-xs text-gray-500 mt-6">
-                    Don't have an account?{' '}
+                    Don&apos;t have an account?{' '}
                     <Link
                         href={`/signup?next=${encodeURIComponent(next)}`}
                         className="text-red-500 font-bold hover:underline"
@@ -175,21 +196,19 @@ function LoginPageInner() {
                     </Link>
                 </p>
 
-                {/* Test credentials details block */}
+                {/* Note: the previous version of this page rendered a "Test
+                    Credentials" block with real-looking credentials in
+                    production. Hard-coded credentials in the HTML are a
+                    well-known foothold for credential-stuffing and brute
+                    force attacks. We render a neutral, non-actionable hint
+                    instead; if you need to test locally, use the seed
+                    accounts the README documents, not anything shipped in
+                    the client bundle. */}
                 <div className="mt-8 border-t border-gray-100 pt-6">
-                    <div className="bg-[#252a67]/5 border border-[#252a67]/10 rounded-2xl p-4 text-[10px] text-gray-600 space-y-2">
-                        <p className="font-bold text-[#252a67] flex items-center gap-1">
-                            <i className="fas fa-info-circle"></i> Test Credentials Available:
-                        </p>
-                        <ul className="space-y-1 font-mono leading-relaxed">
-                            <li>
-                                <strong className="text-[#252a67] font-bold">Patient:</strong> patient@gmail.com / password123
-                            </li>
-                            <li>
-                                <strong className="text-[#252a67] font-bold">Doctor:</strong> doctor@zoomdoctor.in / password123
-                            </li>
-                        </ul>
-                    </div>
+                    <p className="text-[10px] text-gray-400 text-center">
+                        Trouble signing in? Use the{' '}
+                        <Link href="/about" className="underline">contact options</Link> on the About page.
+                    </p>
                 </div>
             </div>
         </main>

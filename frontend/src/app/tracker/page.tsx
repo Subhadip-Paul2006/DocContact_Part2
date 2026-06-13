@@ -46,10 +46,13 @@ export default function TrackerPage() {
             router.replace('/login?next=%2Ftracker');
             return;
         }
-        fetchBookings();
+        // Trigger the initial fetch via a microtask rather than the
+        // effect body so we don't cascade-render synchronously.
+        const initialFetch = setTimeout(fetchBookings, 0);
         // Fallback poll in case the SSE stream isn't reachable.
         if (!pollRef.current) pollRef.current = setInterval(fetchBookings, 10000);
         return () => {
+            clearTimeout(initialFetch);
             if (pollRef.current) clearInterval(pollRef.current);
             if (refreshTimeout.current) clearTimeout(refreshTimeout.current);
             pollRef.current = null;
@@ -86,16 +89,18 @@ export default function TrackerPage() {
     return (
         <main className="max-w-[88rem] mx-auto px-6 py-8 flex flex-col gap-6 fade-in">
             {/* Breadcrumbs */}
-            <div className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
-                <Link href="/" className="hover:text-primary transition-colors">Home</Link>
-                <i className="fas fa-chevron-right text-[8px]"></i>
-                <span className="text-[#252a67]">My Bookings & Tracker</span>
-            </div>
+            <nav aria-label="Breadcrumb">
+                <ol className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
+                    <li><Link href="/" className="hover:text-primary transition-colors">Home</Link></li>
+                    <li aria-hidden="true"><i className="fas fa-chevron-right text-[8px]" /></li>
+                    <li><span className="text-[#252a67]" aria-current="page">My Bookings & Tracker</span></li>
+                </ol>
+            </nav>
 
             {/* Page Title */}
             <div>
                 <h1 className="text-2xl md:text-3xl font-black text-[#252a67] flex items-center gap-2">
-                    <i className="fas fa-desktop text-red-500 text-2xl"></i> Live Queue Tracker
+                    <i className="fas fa-desktop text-red-500 text-2xl" aria-hidden="true" /> Live Queue Tracker
                 </h1>
                 <p className="text-gray-500 text-sm mt-1">Track your active chamber token status in real-time. Stand by when your turn approaches.</p>
             </div>
@@ -104,7 +109,7 @@ export default function TrackerPage() {
             <div className="bg-[#252a67]/5 border border-[#252a67]/20 rounded-2xl p-4 text-xs flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                     <span className="w-8 h-8 rounded-full bg-[#252a67]/10 flex items-center justify-center text-[#252a67] text-sm flex-shrink-0">
-                        <i className="fas fa-robot"></i>
+                        <i className="fas fa-robot" aria-hidden="true" />
                     </span>
                     <div>
                         <strong className="text-[#252a67] block font-bold">Simulator Active</strong>
@@ -113,24 +118,25 @@ export default function TrackerPage() {
                 </div>
                 <div className="hidden md:block">
                     <span className="text-[10px] text-emerald-600 bg-emerald-50 py-1 px-3 border border-emerald-100 rounded-full font-bold">
-                        <i className="fas fa-sync-alt animate-spin text-[8px] mr-1"></i> Running
+                        <i className="fas fa-sync-alt animate-spin text-[8px] mr-1" aria-hidden="true" /> Running
                     </span>
                 </div>
             </div>
 
-            {error && <div className="error-banner">{error}</div>}
+            {error && <div className="error-banner" role="alert">{error}</div>}
 
             {bookings === null ? (
-                <div className="loading">
+                <div className="loading" role="status" aria-live="polite">
                     <div className="spinner" />
+                    <span className="sr-only">Loading your bookings…</span>
                 </div>
             ) : bookings.length === 0 ? (
                 <div className="text-center bg-white border border-gray-100 rounded-3xl p-12 shadow-sm">
                     <div className="w-16 h-16 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 text-3xl mx-auto mb-4">
-                        <i className="far fa-calendar-times"></i>
+                        <i className="far fa-calendar-times" aria-hidden="true" />
                     </div>
                     <h3 className="text-lg font-bold text-[#252a67] mb-1">No Bookings Found</h3>
-                    <p className="text-sm text-gray-500 mb-6">You haven't booked any chamber doctor appointments yet.</p>
+                    <p className="text-sm text-gray-500 mb-6">You haven&apos;t booked any chamber doctor appointments yet.</p>
                     <Link href="/doctors" className="px-6 py-3 font-bold rounded-2xl bg-[#252a67] text-white hover:bg-[#1e2258] transition-colors text-sm shadow-sm">
                         Discover Available Doctors
                     </Link>
@@ -170,7 +176,7 @@ export default function TrackerPage() {
                                         </div>
                                         <h3 className="text-xl font-bold text-[#252a67]">{b.doctorName}</h3>
                                         <p className="text-xs text-red-500 font-bold mt-0.5">{b.doctorSpecialization}</p>
-                                        
+
                                         <div className="grid grid-cols-2 gap-4 mt-4 text-xs border-t border-gray-50 pt-4 max-w-md">
                                             <div>
                                                 <span className="text-gray-400 block">Patient Name</span>
@@ -183,22 +189,32 @@ export default function TrackerPage() {
                                         </div>
                                     </div>
 
-                                    {/* Developer/Testing manual controls */}
-                                    <div className="mt-6 border-t border-gray-100 pt-4 flex flex-wrap gap-2 items-center">
-                                        <span className="text-[10px] text-gray-400 font-medium">Test Controls:</span>
-                                        <button 
-                                            onClick={() => handleAdvance(b.doctorId)} 
-                                            className="py-1 px-3 bg-gray-100 hover:bg-[#252a67] hover:text-white rounded-lg text-[10px] font-bold text-[#252a67] transition-all flex items-center gap-1 focus:outline-none cursor-pointer"
-                                        >
-                                            <i className="fas fa-plus text-[8px]"></i> Call Next Patient
-                                        </button>
-                                        <button 
-                                            onClick={() => handleReset(b.doctorId)} 
-                                            className="py-1 px-3 bg-gray-50 hover:bg-red-50 hover:text-red-500 rounded-lg text-[10px] font-bold text-gray-400 transition-all flex items-center gap-1 focus:outline-none cursor-pointer"
-                                        >
-                                            <i className="fas fa-undo text-[8px]"></i> Reset Queue
-                                        </button>
-                                    </div>
+                                    {/* Developer/Testing manual controls — gated
+                                        to doctor accounts so a malicious
+                                        patient who guesses the endpoint
+                                        cannot reach them. The route is
+                                        `withAuth`-guarded server-side already,
+                                        but the client UI is also restricted
+                                        to `user.role === 'doctor'`. */}
+                                    {user?.role === 'doctor' && (
+                                        <div className="mt-6 border-t border-gray-100 pt-4 flex flex-wrap gap-2 items-center">
+                                            <span className="text-[10px] text-gray-400 font-medium">Test Controls:</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleAdvance(b.doctorId)}
+                                                className="py-1 px-3 bg-gray-100 hover:bg-[#252a67] hover:text-white rounded-lg text-[10px] font-bold text-[#252a67] transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-[#252a67]/40 cursor-pointer"
+                                            >
+                                                <i className="fas fa-plus text-[8px]" aria-hidden="true" /> Call Next Patient
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleReset(b.doctorId)}
+                                                className="py-1 px-3 bg-gray-50 hover:bg-red-50 hover:text-red-500 rounded-lg text-[10px] font-bold text-gray-400 transition-all flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-red-300 cursor-pointer"
+                                            >
+                                                <i className="fas fa-undo text-[8px]" aria-hidden="true" /> Reset Queue
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Right block: Large ticket status metrics */}
@@ -213,12 +229,16 @@ export default function TrackerPage() {
                                             <strong className="text-xl font-black mt-0.5 leading-none block">{current}</strong>
                                         </div>
                                     </div>
-                                    
-                                    <div>
+
+                                    {/* aria-live announces the state transition
+                                        so a screen reader user hears the
+                                        "your turn" change as soon as the
+                                        queue advances. */}
+                                    <div aria-live="polite" aria-atomic="true">
                                         {yourTurn ? (
                                             <>
                                                 <div className="bg-emerald-500 text-white rounded-2xl p-4 animate-pulse flex items-center justify-between shadow-md shadow-emerald-100">
-                                                    <span className="font-black flex items-center gap-2 text-sm"><i className="fas fa-bullhorn"></i> IT'S YOUR TURN!</span>
+                                                    <span className="font-black flex items-center gap-2 text-sm"><i className="fas fa-bullhorn" aria-hidden="true" /> IT&apos;S YOUR TURN!</span>
                                                     <span className="font-black text-xs uppercase tracking-wide">Enter Chamber</span>
                                                 </div>
                                                 <p className="text-emerald-600 font-bold text-[10px] text-right mt-1.5">Please report to the compounder immediately.</p>
@@ -226,7 +246,7 @@ export default function TrackerPage() {
                                         ) : isMissed ? (
                                             <>
                                                 <div className="bg-gray-100 text-gray-500 rounded-2xl p-4 flex items-center justify-between">
-                                                    <span className="font-bold flex items-center gap-2"><i className="fas fa-check-circle"></i> Appointment:</span>
+                                                    <span className="font-bold flex items-center gap-2"><i className="fas fa-check-circle" aria-hidden="true" /> Appointment:</span>
                                                     <span className="font-bold text-xs uppercase tracking-wider">Passed / Missed</span>
                                                 </div>
                                                 <p className="text-gray-400 text-[10px] text-right mt-1.5 font-medium">This session token has already passed.</p>
@@ -234,7 +254,7 @@ export default function TrackerPage() {
                                         ) : (
                                             <>
                                                 <div className="bg-[#252a67]/5 text-[#252a67] border border-[#252a67]/10 rounded-2xl p-4 flex items-center justify-between">
-                                                    <span className="font-bold flex items-center gap-2 text-xs"><i className="fas fa-hourglass-half text-[#252a67]"></i> Chamber Status:</span>
+                                                    <span className="font-bold flex items-center gap-2 text-xs"><i className="fas fa-hourglass-half text-[#252a67]" aria-hidden="true" /> Chamber Status:</span>
                                                     <span className="font-black text-xs text-right">{wait} patient{wait === 1 ? '' : 's'} ahead</span>
                                                 </div>
                                                 <p className="text-gray-400 text-[10px] text-right mt-1.5">Please arrive at the chamber at least 15 mins before your token is called.</p>

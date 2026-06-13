@@ -125,11 +125,13 @@ export default function ApplyPage() {
                 {/* Left Info Block: Benefits */}
                 <div className="lg:col-span-5 space-y-6">
                     {/* Breadcrumbs */}
-                    <div className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
-                        <Link href="/" className="hover:text-primary transition-colors">Home</Link>
-                        <i className="fas fa-chevron-right text-[8px]"></i>
-                        <span className="text-[#252a67]">Apply Listing</span>
-                    </div>
+                    <nav aria-label="Breadcrumb">
+                        <ol className="text-xs font-bold text-gray-400 flex items-center gap-1.5">
+                            <li><Link href="/" className="hover:text-primary transition-colors">Home</Link></li>
+                            <li aria-hidden="true"><i className="fas fa-chevron-right text-[8px]" /></li>
+                            <li><span className="text-[#252a67]" aria-current="page">Apply Listing</span></li>
+                        </ol>
+                    </nav>
 
                     <div className="space-y-4">
                         <h1 className="text-2xl md:text-3xl font-black text-[#252a67] leading-tight">
@@ -150,7 +152,7 @@ export default function ApplyPage() {
                             </span>
                             <div>
                                 <h4 className="font-bold text-xs text-[#252a67]">Zero Commission Model</h4>
-                                <p className="text-gray-500 text-[11px] mt-0.5">We don't take cut percentages from consultations. Keep 100% of the patient fees paid directly at the counter.</p>
+                                <p className="text-gray-500 text-[11px] mt-0.5">We don&apos;t take cut percentages from consultations. Keep 100% of the patient fees paid directly at the counter.</p>
                             </div>
                         </div>
 
@@ -183,9 +185,9 @@ export default function ApplyPage() {
                     </h2>
                     <p className="text-xs text-gray-500 border-b border-gray-100 pb-4 mb-6">Enter professional and scheduling coordinates. Listed chambers go live instantly.</p>
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form onSubmit={handleSubmit} className="space-y-6" noValidate>
                         {errors.length > 0 && (
-                            <div className="error-banner">
+                            <div className="error-banner" role="alert" aria-live="assertive">
                                 {errors.map((e, i) => (
                                     <div key={i}>{e}</div>
                                 ))}
@@ -193,12 +195,12 @@ export default function ApplyPage() {
                         )}
 
                         {/* Section 1: Professional details */}
-                        <div className="space-y-4">
-                            <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider">1. Doctor Details</h3>
+                        <fieldset className="space-y-4">
+                            <legend className="text-xs font-bold uppercase text-gray-400 tracking-wider">1. Doctor Details</legend>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label htmlFor="fullName" className="block text-xs font-bold text-gray-600 mb-1">Doctor's Full Name</label>
+                                    <label htmlFor="fullName" className="block text-xs font-bold text-gray-600 mb-1">Doctor&apos;s Full Name</label>
                                     <input
                                         type="text"
                                         id="fullName"
@@ -281,11 +283,11 @@ export default function ApplyPage() {
                                     />
                                 </div>
                             </div>
-                        </div>
+                        </fieldset>
 
                         {/* Section 2: Logistics / Chamber Info */}
-                        <div className="space-y-4 border-t border-gray-100 pt-6">
-                            <h3 className="text-xs font-bold uppercase text-gray-400 tracking-wider">2. Chamber & Consult Details</h3>
+                        <fieldset className="space-y-4 border-t border-gray-100 pt-6">
+                            <legend className="text-xs font-bold uppercase text-gray-400 tracking-wider">2. Chamber & Consult Details</legend>
                             
                             <div>
                                 <label htmlFor="location" className="block text-xs font-bold text-gray-600 mb-1">Chamber Address / Landmark</label>
@@ -368,6 +370,7 @@ export default function ApplyPage() {
                                         required
                                         min="1"
                                         max="200"
+                                        inputMode="numeric"
                                         value={form.maxTokens}
                                         onChange={(e) => update({ maxTokens: e.target.value })}
                                         className="py-2.5 px-4 border border-gray-200 focus:border-primary rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -375,15 +378,15 @@ export default function ApplyPage() {
                                     />
                                 </div>
                             </div>
-                        </div>
+                        </fieldset>
 
                         {/* Submit Button */}
                         <button
                             type="submit"
                             disabled={submitting}
-                            className="w-full py-4 px-6 font-bold text-sm text-white bg-[#252a67] hover:bg-[#1e2258] rounded-2xl transition-all shadow-md focus:outline-none flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                            className="w-full py-4 px-6 font-bold text-sm text-white bg-[#252a67] hover:bg-[#1e2258] rounded-2xl transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-[#252a67]/40 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                         >
-                            <i className="fas fa-cloud-upload-alt"></i>
+                            <i className="fas fa-cloud-upload-alt" aria-hidden="true" />
                             {submitting ? 'Publishing Chamber Listing…' : 'Publish Chamber Listing'}
                         </button>
                     </form>

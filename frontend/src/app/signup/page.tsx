@@ -16,7 +16,15 @@ function SignupPageInner() {
     const { signup } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
-    const next = searchParams.get('next') || '/';
+    // `next` is user-controlled via the query string. Refuse any value
+    // that isn't a path on this site — otherwise a phishing link such as
+    // `/signup?next=https://evil.example.com/login` would silently send
+    // post-signup users to the attacker's page.
+    const rawNext = searchParams.get('next') || '/';
+    const next =
+        rawNext.startsWith('/') && !rawNext.startsWith('//')
+            ? rawNext
+            : '/';
 
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -71,9 +79,9 @@ function SignupPageInner() {
                     <p className="text-xs text-gray-500 mt-1">Create an account to manage your healthcare booking journey.</p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4" noValidate>
                     {errors.length > 0 && (
-                        <div className="error-banner mb-4">
+                        <div className="error-banner mb-4" role="alert" aria-live="assertive">
                             {errors.map((e, i) => (
                                 <div key={i}>{e}</div>
                             ))}
@@ -85,12 +93,13 @@ function SignupPageInner() {
                             Full Name
                         </label>
                         <div className="relative flex items-center">
-                            <i className="far fa-user text-gray-400 absolute left-4"></i>
+                            <i className="far fa-user text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="su-name"
                                 type="text"
                                 required
                                 autoComplete="name"
+                                maxLength={100}
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -104,12 +113,13 @@ function SignupPageInner() {
                             Email Address
                         </label>
                         <div className="relative flex items-center">
-                            <i className="far fa-envelope text-gray-400 absolute left-4"></i>
+                            <i className="far fa-envelope text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="su-email"
                                 type="email"
                                 required
                                 autoComplete="email"
+                                maxLength={254}
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -139,12 +149,14 @@ function SignupPageInner() {
                             Create Password
                         </label>
                         <div className="relative flex items-center">
-                            <i className="fas fa-lock text-gray-400 absolute left-4"></i>
+                            <i className="fas fa-lock text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="su-password"
                                 type="password"
                                 required
                                 autoComplete="new-password"
+                                minLength={6}
+                                maxLength={200}
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -158,11 +170,13 @@ function SignupPageInner() {
                             Confirm Password
                         </label>
                         <div className="relative flex items-center">
-                            <i className="fas fa-check-double text-gray-400 absolute left-4"></i>
+                            <i className="fas fa-check-double text-gray-400 absolute left-4" aria-hidden="true" />
                             <input
                                 id="su-confirm-password"
                                 type="password"
                                 required
+                                autoComplete="new-password"
+                                maxLength={200}
                                 value={confirmPassword}
                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                 className="pl-11 pr-4 py-2.5 border border-gray-200 focus:border-[#252a67] rounded-xl w-full text-sm outline-none text-[#252a67] bg-gray-50"
@@ -174,7 +188,7 @@ function SignupPageInner() {
                     <button
                         type="submit"
                         disabled={submitting}
-                        className="w-full py-3 px-4 font-bold text-xs text-white bg-[#252a67] hover:bg-[#1e2258] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                        className="w-full py-3 px-4 font-bold text-xs text-white bg-[#252a67] hover:bg-[#1e2258] rounded-xl transition-all shadow-sm cursor-pointer disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#252a67]/40"
                     >
                         {submitting ? 'Creating account…' : 'Register Account'}
                     </button>
